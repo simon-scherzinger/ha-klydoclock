@@ -21,9 +21,11 @@ by Klydo.
 | Sensors **Brightness level**, **Favorites** | App brightness level, number of favorites; the favorites' ids and names as attributes |
 | Diagnostic sensors | Screen state, night mode, mode |
 
-There are also two actions: **klydoclock.show_klydo** walks the clock to any
-klydo in its feed or favorites, by name or id, and **klydoclock.set_mode**
-switches between FEED and FAVORITE mode.
+There are also actions: **klydoclock.show_klydo** walks the clock to any
+klydo in its feed or favorites, by name or id, **klydoclock.set_mode**
+switches between FEED and FAVORITE mode, and **klydoclock.show_video**,
+**set_video** and **restore_video** give a klydo your own video and put its
+original back (see [Own videos](#own-videos)).
 
 ## How it works
 
@@ -76,14 +78,33 @@ app has put back (its nightly sync can re-download klydos) is replaced again,
 and an unchanged one costs a single checksum. Every uploaded video is also kept
 on the clock in `/sdcard/klydoclock-ha/<md5>.mp4`: only the first use of a file
 uploads it (a few seconds per megabyte), later switches are a local copy. The
-klydo keeps its name, artist and colors. The original video is not kept: make a
-copy first if you want it back. Pick a klydo that stays in the feed; one the app
-drops from its catalog loses its folder.
+klydo keeps its name, artist and colors, including the colors of hands and
+pendulum: pick a klydo whose hands are readable on your video. Pick a klydo
+that stays in the feed; one the app drops from its catalog loses its folder.
 
-`klydoclock.set_video` takes the same `video` and `klydo` but does not navigate,
-e.g. to put a klydo's own video back once a signal is over, so that it looks
-normal when you browse the feed. If that klydo is on display, the clock steps
-away and back so the new file plays.
+No video is ever replaced without a copy. Before a klydo's video is replaced,
+the one it plays is copied to `/sdcard/klydoclock-ha/originals/<mainLoop>/<md5>.mp4`
+and the copy is checked against its MD5; if that fails, nothing is replaced.
+Videos uploaded by the integration are not copied again, the cache already
+holds them. Backups are named by their content and are never overwritten or
+deleted, so a newer original the app downloads later is kept next to the
+first. Right before the new file is moved in, the integration checks that the
+klydo still plays the video it backed up; if the app wrote another one
+meanwhile, the action fails and can be repeated.
+
+`klydoclock.restore_video` puts the newest backed-up original back:
+
+```yaml
+actions:
+  - action: klydoclock.restore_video
+    data:
+      klydo: "Moebius"
+```
+
+`klydoclock.set_video` takes the same `video` and `klydo` as `show_video` but
+does not navigate, e.g. to switch a klydo between your own videos without
+bringing it on display. With both actions, if that klydo is on display, the
+clock steps away and back so the new file plays.
 
 ### Switching the mode
 

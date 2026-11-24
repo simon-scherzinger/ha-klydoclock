@@ -169,15 +169,29 @@
     },
     "set_video": {
       "name": "Set video",
-      "description": "Gives a klydo another video without bringing it on display, e.g. to put its own video back after a signal. If the klydo is on display, the clock steps away and back so the new video plays.",
+      "description": "Gives a klydo another video without bringing it on display, e.g. to switch between your own videos. Restore video puts the original back. If the klydo is on display, the clock steps away and back so the new video plays.",
       "fields": {
         "video": {
           "name": "Video",
-          "description": "MP4 file inside the Home Assistant config directory, e.g. klydoclock/original/moebius.mp4."
+          "description": "MP4 file inside the Home Assistant config directory, e.g. klydoclock/washer_done.mp4."
         },
         "klydo": {
           "name": "Klydo",
           "description": "Name or id of the klydo whose video is replaced."
+        },
+        "device_id": {
+          "name": "Device",
+          "description": "The clock to control. Only needed when more than one is set up."
+        }
+      }
+    },
+    "restore_video": {
+      "name": "Restore video",
+      "description": "Puts a klydo's original video back. Before any video is replaced, the integration keeps a verified copy of it on the clock; this action uses the newest one. If the klydo is on display, the clock steps away and back so the video plays.",
+      "fields": {
+        "klydo": {
+          "name": "Klydo",
+          "description": "Name or id of the klydo whose original video is put back."
         },
         "device_id": {
           "name": "Device",

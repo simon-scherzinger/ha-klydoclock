@@ -169,15 +169,29 @@
     },
     "set_video": {
       "name": "Video setzen",
-      "description": "Gibt einem Klydo ein anderes Video, ohne ihn anzuzeigen, z. B. um nach einem Signal sein eigenes Video zurückzuspielen. Läuft der Klydo gerade, wechselt die Uhr kurz weg und zurück, damit das neue Video spielt.",
+      "description": "Gibt einem Klydo ein anderes Video, ohne ihn anzuzeigen, z. B. um zwischen eigenen Videos zu wechseln. Das Original kommt mit „Video wiederherstellen“ zurück. Läuft der Klydo gerade, wechselt die Uhr kurz weg und zurück, damit das neue Video spielt.",
       "fields": {
         "video": {
           "name": "Video",
-          "description": "MP4-Datei im Konfigurationsordner von Home Assistant, z. B. klydoclock/original/moebius.mp4."
+          "description": "MP4-Datei im Konfigurationsordner von Home Assistant, z. B. klydoclock/washer_done.mp4."
         },
         "klydo": {
           "name": "Klydo",
           "description": "Name oder ID des Klydos, dessen Video ersetzt wird."
+        },
+        "device_id": {
+          "name": "Gerät",
+          "description": "Die zu steuernde Uhr. Nur nötig, wenn mehrere eingerichtet sind."
+        }
+      }
+    },
+    "restore_video": {
+      "name": "Video wiederherstellen",
+      "description": "Legt das Originalvideo eines Klydos zurück. Bevor ein Video ersetzt wird, behält die Integration eine geprüfte Kopie davon auf der Uhr; diese Aktion nimmt die neueste. Läuft der Klydo gerade, wechselt die Uhr kurz weg und zurück, damit das Video spielt.",
+      "fields": {
+        "klydo": {
+          "name": "Klydo",
+          "description": "Name oder ID des Klydos, dessen Originalvideo zurückgelegt wird."
         },
         "device_id": {
           "name": "Gerät",

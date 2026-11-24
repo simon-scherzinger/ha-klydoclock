@@ -26,6 +26,7 @@ SERVICE_SHOW_KLYDO = "show_klydo"
 SERVICE_SET_MODE = "set_mode"
 SERVICE_SHOW_VIDEO = "show_video"
 SERVICE_SET_VIDEO = "set_video"
+SERVICE_RESTORE_VIDEO = "restore_video"
 ATTR_KLYDO = "klydo"
 ATTR_MODE = "mode"
 ATTR_VIDEO = "video"
@@ -39,6 +40,10 @@ VIDEO_LABEL = "u:object_r:media_rw_data_file:s0"
 # klydo between videos it had before is a local copy instead of an upload.
 # Outside gifs2, which the app's midnight cleanup prunes.
 VIDEO_CACHE = "/data/media/0/klydoclock-ha"
+# Before a klydo's video is replaced, the one it plays is copied here as
+# <mainLoop>/<md5>.mp4, unless it was uploaded by the integration (then the
+# cache holds it). Nothing ever deletes or overwrites these files.
+VIDEO_ORIGINALS = f"{VIDEO_CACHE}/originals"
 MAX_VIDEO_BYTES = 20 * 1024 * 1024
 # Raw bytes per shell call when uploading; adb-shell's file sync push stalls
 # against this clock, base64 through the shell does not.

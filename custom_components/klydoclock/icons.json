@@ -77,6 +77,9 @@
     },
     "set_video": {
       "service": "mdi:movie-edit"
+    },
+    "restore_video": {
+      "service": "mdi:backup-restore"
     }
   }
 }

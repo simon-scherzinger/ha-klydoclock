@@ -65,9 +65,22 @@ set_video:
   fields:
     video:
       required: true
-      example: "klydoclock/original/moebius.mp4"
+      example: "klydoclock/washer_done.mp4"
       selector:
         text:
+    klydo:
+      required: true
+      example: "Moebius"
+      selector:
+        text:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: klydoclock
+
+restore_video:
+  fields:
     klydo:
       required: true
       example: "Moebius"

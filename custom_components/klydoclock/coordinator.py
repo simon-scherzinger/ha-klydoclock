@@ -49,6 +49,7 @@ from .const import (
     SETTINGS_PATH,
     UPLOAD_CHUNK,
     VIDEO_CACHE,
+    VIDEO_ORIGINALS,
     VIDEO_DIR,
     VIDEO_LABEL,
     VIDEO_OWNER,
@@ -327,14 +328,8 @@ class KlydoCoordinator(DataUpdateCoordinator[KlydoState]):
         if klydo is None:
             raise ServiceValidationError(f"The clock knows no klydo with id {klydo_id}")
         data = await self.hass.async_add_executor_job(video.read_bytes)
-        if not await self._ensure_video(klydo.main_loop, data):
-            return
-        try:
-            state = await self._async_update_data()
-        except UpdateFailed as err:
-            raise HomeAssistantError(f"Klydoclock: {err}") from err
-        if state.klydo_id == klydo_id and state.display_mode != DISPLAY_OFF:
-            await self._run_exclusive(self._reopen)
+        if await self._ensure_video(klydo.main_loop, data):
+            await self._reopen_if_shown(klydo_id)
 
     async def _reopen(self) -> None:
         """Step to the next klydo and back, so the player reopens its file."""
@@ -343,36 +338,141 @@ class KlydoCoordinator(DataUpdateCoordinator[KlydoState]):
         await self.adb.keyevent(KEY_PREVIOUS)
         await self._read_settled_state()
 
+    async def async_restore_video(self, klydo_id: str) -> None:
+        """Put the klydo's original video back, from the backup on the clock."""
+        klydo = self.catalog.get(klydo_id)
+        if klydo is None:
+            raise ServiceValidationError(f"The clock knows no klydo with id {klydo_id}")
+        if await self._restore_original(klydo.main_loop):
+            await self._reopen_if_shown(klydo_id)
+
+    async def _reopen_if_shown(self, klydo_id: str) -> None:
+        """Make the player open the klydo's new file if it is on display."""
+        try:
+            state = await self._async_update_data()
+        except UpdateFailed as err:
+            raise HomeAssistantError(f"Klydoclock: {err}") from err
+        if state.klydo_id == klydo_id and state.display_mode != DISPLAY_OFF:
+            await self._run_exclusive(self._reopen)
+
     async def _ensure_video(self, main_loop: str, data: bytes) -> bool:
         """Put data in place as the klydo's video; return whether it changed."""
-        folder = f"{VIDEO_DIR}/{main_loop}"
-        target = f"{folder}/{main_loop}.mp4"
-        tmp = f"{folder}/.{main_loop}.mp4.tmp"
+        target = f"{VIDEO_DIR}/{main_loop}/{main_loop}.mp4"
         want = hashlib.md5(data).hexdigest()
         cached = f"{VIDEO_CACHE}/{want}.mp4"
         async with self._video_lock:
-            if await self._md5(target) == want:
+            current = await self._md5(target)
+            if current == want:
                 return False
-            if await self.adb.shell(f"test -d '{folder}' && echo ok") != "ok":
-                # Only the app creates klydo folders; its midnight cleanup deletes
-                # any folder without a klydo in its database.
-                raise HomeAssistantError(f"Klydoclock: no video folder for {main_loop}")
+            await self._check_folder(main_loop)
+            await self._backup_original(main_loop, current)
             if await self._md5(cached) != want:
                 await self._upload(cached, data, want)
-            if await self.adb.shell(
-                f"rm -f '{tmp}' && cp '{cached}' '{tmp}' && echo ok"
-            ) != "ok" or await self._md5(tmp) != want:
-                await self.adb.shell(f"rm -f '{tmp}'")
-                raise HomeAssistantError("Klydoclock: video could not be copied")
-            # Same owner, mode and SELinux label as the app's own files, then an
-            # atomic rename, so the player never sees a half-written file.
-            await self.adb.shell(
-                f"chown {VIDEO_OWNER} '{tmp}' && chmod 664 '{tmp}' && "
-                f"chcon {VIDEO_LABEL} '{tmp}' && mv -f '{tmp}' '{target}'"
-            )
-            if await self._md5(target) != want:
-                raise HomeAssistantError("Klydoclock: video could not be put in place")
+            await self._put_in_place(main_loop, cached, want, current)
         return True
+
+    async def _restore_original(self, main_loop: str) -> bool:
+        """Put the newest backed-up original in place; return whether it changed."""
+        target = f"{VIDEO_DIR}/{main_loop}/{main_loop}.mp4"
+        async with self._video_lock:
+            current = await self._md5(target)
+            if current is not None and not await self._is_ours(current):
+                # Not uploaded by the integration: the klydo already plays an
+                # original, e.g. one the app downloaded again.
+                return False
+            newest = await self.adb.shell(
+                f"ls -t '{VIDEO_ORIGINALS}/{main_loop}/'*.mp4 2>/dev/null | head -n 1"
+            )
+            if not newest:
+                raise HomeAssistantError(
+                    f"Klydoclock: no original video of {main_loop} is kept on the clock"
+                )
+            want = newest.rsplit("/", 1)[-1].removesuffix(".mp4")
+            await self._check_folder(main_loop)
+            # current is one of ours (the cache holds it) or missing: nothing to back up.
+            await self._put_in_place(main_loop, newest, want, current)
+        _LOGGER.info("Restored the original video of %s", main_loop)
+        return True
+
+    async def _check_folder(self, main_loop: str) -> None:
+        folder = f"{VIDEO_DIR}/{main_loop}"
+        if await self.adb.shell(f"test -d '{folder}' && echo ok") != "ok":
+            # Only the app creates klydo folders; its midnight cleanup deletes
+            # any folder without a klydo in its database.
+            raise HomeAssistantError(f"Klydoclock: no video folder for {main_loop}")
+
+    async def _is_ours(self, md5: str) -> bool:
+        """Whether a video with this MD5 was uploaded by the integration."""
+        return await self.adb.shell(f"test -f '{VIDEO_CACHE}/{md5}.mp4' && echo ok") == "ok"
+
+    async def _backup_original(self, main_loop: str, current: str | None) -> None:
+        """Keep a verified copy of the klydo's current video before it is replaced.
+
+        Videos uploaded by the integration are kept in the cache already. Any
+        other video is copied to originals/<mainLoop>/<md5>.mp4, which is never
+        overwritten or deleted. If the copy fails, this raises, so the video is
+        not replaced.
+        """
+        if current is None or await self._is_ours(current):
+            return
+        folder = f"{VIDEO_ORIGINALS}/{main_loop}"
+        backup = f"{folder}/{current}.mp4"
+        if await self._md5(backup) == current:
+            return
+        part = f"{backup}.part"
+        await self.adb.shell(
+            f"mkdir -p '{folder}' && touch '{VIDEO_CACHE}/.nomedia' && rm -f '{part}' && "
+            f"cp '{VIDEO_DIR}/{main_loop}/{main_loop}.mp4' '{part}'"
+        )
+        if await self._md5(part) != current:
+            await self.adb.shell(f"rm -f '{part}'")
+            raise HomeAssistantError(
+                f"Klydoclock: the video of {main_loop} could not be backed up, "
+                "so it was not replaced"
+            )
+        await self.adb.shell(
+            f"chown -R {VIDEO_OWNER} '{VIDEO_CACHE}' && "
+            f"chcon -R {VIDEO_LABEL} '{VIDEO_CACHE}' && mv -f '{part}' '{backup}'"
+        )
+        if await self._md5(backup) != current:
+            raise HomeAssistantError(
+                f"Klydoclock: the video of {main_loop} could not be backed up, "
+                "so it was not replaced"
+            )
+        _LOGGER.info("Backed up the video of %s to %s", main_loop, backup)
+
+    async def _put_in_place(
+        self, main_loop: str, source: str, want: str, expect: str | None
+    ) -> None:
+        """Copy source over the klydo's video if that is still the one with MD5 expect."""
+        folder = f"{VIDEO_DIR}/{main_loop}"
+        target = f"{folder}/{main_loop}.mp4"
+        tmp = f"{folder}/.{main_loop}.mp4.tmp"
+        if await self.adb.shell(
+            f"rm -f '{tmp}' && cp '{source}' '{tmp}' && echo ok"
+        ) != "ok" or await self._md5(tmp) != want:
+            await self.adb.shell(f"rm -f '{tmp}'")
+            raise HomeAssistantError("Klydoclock: video could not be copied")
+        # Only replace the file that was backed up: if the app wrote another one
+        # since, leave it alone.
+        unchanged = (
+            f"[ ! -e '{target}' ]"
+            if expect is None
+            else f"[ \"$(md5sum '{target}' | cut -d ' ' -f 1)\" = '{expect}' ]"
+        )
+        # Same owner, mode and SELinux label as the app's own files, then an
+        # atomic rename, so the player never sees a half-written file.
+        if await self.adb.shell(
+            f"chown {VIDEO_OWNER} '{tmp}' && chmod 664 '{tmp}' && "
+            f"chcon {VIDEO_LABEL} '{tmp}' && {unchanged} && "
+            f"mv -f '{tmp}' '{target}' && echo ok"
+        ) != "ok":
+            await self.adb.shell(f"rm -f '{tmp}'")
+            raise HomeAssistantError(
+                f"Klydoclock: the video of {main_loop} changed meanwhile; try again"
+            )
+        if await self._md5(target) != want:
+            raise HomeAssistantError("Klydoclock: video could not be put in place")
 
     async def _upload(self, path: str, data: bytes, want: str) -> None:
         """Write data to path on the clock, checked against its MD5."""
